@@ -41,12 +41,32 @@ cp .env.example .env
 # Local PDF -> bundle file
 stix-mapper report.pdf
 
+# Password-protected PDF
+stix-mapper report.pdf --password 'hunter2'
+
 # Web page -> bundle file at a chosen path
 stix-mapper https://example.com/threat-report -o intel.stix.json
 
 # Also import into OpenCTI as a draft for review
 stix-mapper report.pdf --push-opencti
+
+# Skip ATT&CK verification (offline / faster), or force a catalog refresh
+stix-mapper report.pdf --no-validate-attack
+stix-mapper report.pdf --refresh-attack
 ```
+
+### ATT&CK technique verification
+
+Model-supplied technique ids can be wrong or hallucinated. By default the mapper
+validates every `attack-pattern` against MITRE's official ATT&CK catalog
+(Enterprise + Mobile + ICS), downloaded once and cached locally:
+
+- a **real** id is kept and the technique **name is canonicalised** to ATT&CK's spelling;
+- a wrong/missing id is **recovered from the technique name** when possible;
+- an id that can't be verified is **dropped** rather than emitted — so a bad id never reaches OpenCTI.
+
+Without the catalog (offline or `--no-validate-attack`) it falls back to strict
+format validation (`T####` / `T####.###`).
 
 The bundle is written as JSON. Import it manually via **Data → Import** in OpenCTI, or use `--push-opencti` to drop it straight into a draft workspace.
 
@@ -69,10 +89,11 @@ The bundle is written as JSON. Import it manually via **Data → Import** in Ope
 ai_stix_mapper/
   cli.py            # stix-mapper command
   config.py         # env / .env settings
-  extractors.py     # PDF + web page -> text
+  extractors.py     # PDF (incl. password-protected) + web page -> text
   llm.py            # OpenAI structured extraction
   schema.py         # pydantic extraction model (no observed-data)
   prompts.py        # analyst system prompt
+  attack.py         # MITRE ATT&CK id verification + cache
   builder.py        # Extraction -> stix2 Bundle
   opencti_client.py # optional draft-only import
 ```

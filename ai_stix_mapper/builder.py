@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 import stix2
 
+from .attack import AttackIndex, resolve_technique
 from .schema import Entity, Extraction, Indicator
 
 # Map our SDO type strings to stix2 classes.
@@ -75,17 +76,26 @@ def _build_observable(ioc: Indicator) -> tuple[stix2.base._STIXBase, str, str]:
     raise ValueError(f"Unsupported ioc_type: {t}")
 
 
-def _build_entity(entity: Entity, author_id: str) -> stix2.base._STIXBase:
+def _build_entity(
+    entity: Entity, author_id: str, attack_index: AttackIndex | None = None
+) -> stix2.base._STIXBase:
     cls = _ENTITY_CLASSES[entity.type]
     kwargs: dict = {"name": entity.name, "created_by_ref": author_id}
     if entity.description:
         kwargs["description"] = entity.description
     if entity.aliases and entity.type in ("threat-actor", "intrusion-set", "malware", "tool", "campaign"):
         kwargs["aliases"] = entity.aliases
-    if entity.type == "attack-pattern" and entity.mitre_id:
-        kwargs["external_references"] = [
-            stix2.ExternalReference(source_name="mitre-attack", external_id=entity.mitre_id)
-        ]
+    if entity.type == "attack-pattern":
+        # Verify the ATT&CK id (and canonicalise the name) so the technique
+        # merges cleanly with OpenCTI's ATT&CK dataset. Only a real id is kept.
+        canonical_name, verified_id = resolve_technique(
+            entity.name, entity.mitre_id, attack_index
+        )
+        kwargs["name"] = canonical_name
+        if verified_id:
+            kwargs["external_references"] = [
+                stix2.ExternalReference(source_name="mitre-attack", external_id=verified_id)
+            ]
     # Type-specific required properties (STIX 2.1).
     if entity.type == "identity":
         # OpenCTI derives entity kind from identity_class. A targeted *sector*
@@ -102,7 +112,11 @@ def _build_entity(entity: Entity, author_id: str) -> stix2.base._STIXBase:
     return cls(allow_custom=True, **kwargs)
 
 
-def build_bundle(extraction: Extraction, author_name: str = "AI STIX Mapper") -> stix2.Bundle:
+def build_bundle(
+    extraction: Extraction,
+    author_name: str = "AI STIX Mapper",
+    attack_index: AttackIndex | None = None,
+) -> stix2.Bundle:
     now = _now()
     author = stix2.Identity(name=author_name, identity_class="organization")
 
@@ -111,7 +125,7 @@ def build_bundle(extraction: Extraction, author_name: str = "AI STIX Mapper") ->
 
     # Entities (SDOs)
     for entity in extraction.entities:
-        obj = _build_entity(entity, author.id)
+        obj = _build_entity(entity, author.id, attack_index)
         ref_to_id[entity.ref] = obj.id
         objects.append(obj)
 

@@ -9,9 +9,10 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from .attack import AttackIndex
 from .builder import build_bundle
 from .config import Settings
-from .extractors import extract_text
+from .extractors import PdfPasswordError, extract_text
 from .llm import extract_stix
 
 console = Console()
@@ -28,11 +29,34 @@ console = Console()
 )
 @click.option("--author", default="AI STIX Mapper", help="Name for the author Identity.")
 @click.option(
+    "--password",
+    default=None,
+    help="Password for an encrypted (password-protected) PDF.",
+)
+@click.option(
+    "--validate-attack/--no-validate-attack",
+    default=True,
+    help="Verify ATT&CK technique ids against MITRE's catalog (downloaded + cached once).",
+)
+@click.option(
+    "--refresh-attack",
+    is_flag=True,
+    help="Force re-download of the cached ATT&CK catalog.",
+)
+@click.option(
     "--push-opencti",
     is_flag=True,
     help="Also import the bundle into OpenCTI as a draft for review.",
 )
-def main(source: str, output: Path | None, author: str, push_opencti: bool) -> None:
+def main(
+    source: str,
+    output: Path | None,
+    author: str,
+    password: str | None,
+    validate_attack: bool,
+    refresh_attack: bool,
+    push_opencti: bool,
+) -> None:
     """Map a PDF or web page (SOURCE) into a STIX 2.1 bundle for OpenCTI.
 
     SOURCE may be a local .pdf path or an http(s) URL.
@@ -43,15 +67,20 @@ def main(source: str, output: Path | None, author: str, push_opencti: bool) -> N
         console.print(f"[red]Config error:[/red] {exc}")
         sys.exit(1)
 
-    with console.status("[bold]Extracting source text…"):
-        text, label = extract_text(source)
+    try:
+        with console.status("[bold]Extracting source text…"):
+            text, label = extract_text(source, password=password)
+    except PdfPasswordError as exc:
+        console.print(f"[red]{exc}[/red]")
+        sys.exit(1)
     console.print(f"Read [cyan]{len(text):,}[/cyan] chars from [dim]{label}[/dim]")
 
     with console.status("[bold]Asking the model for STIX structure…"):
         extraction = extract_stix(text, settings)
     _print_summary(extraction)
 
-    bundle = build_bundle(extraction, author_name=author)
+    attack_index = _load_attack_index(validate_attack, refresh_attack)
+    bundle = build_bundle(extraction, author_name=author, attack_index=attack_index)
     bundle_json = bundle.serialize(pretty=True)
 
     out_path = output or Path(f"{_slug(extraction.report_name)}.stix.json")
@@ -60,6 +89,24 @@ def main(source: str, output: Path | None, author: str, push_opencti: bool) -> N
 
     if push_opencti:
         _push(bundle_json, settings, extraction.report_name)
+
+
+def _load_attack_index(validate: bool, refresh: bool) -> AttackIndex | None:
+    if not validate:
+        return None
+    with console.status("[bold]Loading MITRE ATT&CK catalog…"):
+        try:
+            index = AttackIndex.load(refresh=refresh)
+        except Exception as exc:  # network / parse issues shouldn't be fatal
+            console.print(f"[yellow]ATT&CK catalog unavailable ({exc}); "
+                          "falling back to format-only id checks.[/yellow]")
+            return None
+    if index is None:
+        console.print("[yellow]ATT&CK catalog unavailable; "
+                      "falling back to format-only id checks.[/yellow]")
+    else:
+        console.print(f"ATT&CK catalog loaded ([cyan]{len(index.id_to_name):,}[/cyan] techniques)")
+    return index
 
 
 def _push(bundle_json: str, settings: Settings, report_name: str) -> None:
