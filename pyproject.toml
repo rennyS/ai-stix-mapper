@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-stix-mapper"
+version = "0.1.0"
+description = "AI-powered STIX 2.1 bundle generator from PDFs and web pages for OpenCTI import"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.0",
+    "stix2>=3.0",
+    "pydantic>=2.0",
+    "pymupdf>=1.24",
+    "httpx>=0.27",
+    "beautifulsoup4>=4.12",
+    "click>=8.1",
+    "rich>=13.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+opencti = ["pycti>=6.0"]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[project.scripts]
+stix-mapper = "ai_stix_mapper.cli:main"
+
+[tool.setuptools]
+packages = ["ai_stix_mapper"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
