@@ -36,25 +36,41 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _build_observable(ioc: Indicator) -> tuple[stix2.base._STIXBase, str]:
-    """Return (sco_object, stix_pattern) for an indicator."""
+# ioc_type -> OpenCTI "main observable type" label. OpenCTI can infer this from
+# the pattern, but stamping it explicitly makes indicator import deterministic.
+_OCTI_OBSERVABLE_TYPE = {
+    "ipv4-addr": "IPv4-Addr",
+    "ipv6-addr": "IPv6-Addr",
+    "domain-name": "Domain-Name",
+    "url": "Url",
+    "email-addr": "Email-Addr",
+    "file:md5": "StixFile",
+    "file:sha1": "StixFile",
+    "file:sha256": "StixFile",
+}
+
+
+def _build_observable(ioc: Indicator) -> tuple[stix2.base._STIXBase, str, str]:
+    """Return (sco_object, stix_pattern, opencti_main_observable_type)."""
     t = ioc.ioc_type
     v = ioc.value
+    octi = _OCTI_OBSERVABLE_TYPE[t]
     if t == "ipv4-addr":
-        return stix2.IPv4Address(value=v), f"[ipv4-addr:value = '{v}']"
+        return stix2.IPv4Address(value=v), f"[ipv4-addr:value = '{v}']", octi
     if t == "ipv6-addr":
-        return stix2.IPv6Address(value=v), f"[ipv6-addr:value = '{v}']"
+        return stix2.IPv6Address(value=v), f"[ipv6-addr:value = '{v}']", octi
     if t == "domain-name":
-        return stix2.DomainName(value=v), f"[domain-name:value = '{v}']"
+        return stix2.DomainName(value=v), f"[domain-name:value = '{v}']", octi
     if t == "url":
-        return stix2.URL(value=v), f"[url:value = '{v}']"
+        return stix2.URL(value=v), f"[url:value = '{v}']", octi
     if t == "email-addr":
-        return stix2.EmailAddress(value=v), f"[email-addr:value = '{v}']"
+        return stix2.EmailAddress(value=v), f"[email-addr:value = '{v}']", octi
     if t.startswith("file:"):
         algo = {"md5": "MD5", "sha1": "SHA-1", "sha256": "SHA-256"}[t.split(":", 1)[1]]
         return (
             stix2.File(hashes={algo: v}),
             f"[file:hashes.'{algo}' = '{v}']",
+            octi,
         )
     raise ValueError(f"Unsupported ioc_type: {t}")
 
@@ -72,7 +88,10 @@ def _build_entity(entity: Entity, author_id: str) -> stix2.base._STIXBase:
         ]
     # Type-specific required properties (STIX 2.1).
     if entity.type == "identity":
-        kwargs.setdefault("identity_class", "organization")
+        # OpenCTI derives entity kind from identity_class. A targeted *sector*
+        # uses the STIX "class" value, which OpenCTI ingests as a Sector.
+        ic = (entity.identity_class or "organization").lower()
+        kwargs["identity_class"] = "class" if ic == "sector" else ic
     elif entity.type == "malware":
         # We extract families, not specific samples, by default.
         kwargs["is_family"] = True
@@ -98,7 +117,7 @@ def build_bundle(extraction: Extraction, author_name: str = "AI STIX Mapper") ->
 
     # Indicators + observables + based-on
     for ioc in extraction.indicators:
-        sco, pattern = _build_observable(ioc)
+        sco, pattern, octi_type = _build_observable(ioc)
         indicator = stix2.Indicator(
             name=ioc.name or ioc.value,
             description=ioc.description,
@@ -106,6 +125,8 @@ def build_bundle(extraction: Extraction, author_name: str = "AI STIX Mapper") ->
             pattern_type="stix",
             valid_from=now,
             created_by_ref=author.id,
+            allow_custom=True,
+            x_opencti_main_observable_type=octi_type,
         )
         ref_to_id[ioc.ref] = indicator.id
         based_on = stix2.Relationship(
@@ -138,6 +159,7 @@ def build_bundle(extraction: Extraction, author_name: str = "AI STIX Mapper") ->
         name=extraction.report_name,
         description=extraction.report_description,
         published=published,
+        report_types=extraction.report_types or ["threat-report"],
         labels=extraction.labels or None,
         object_refs=[o.id for o in objects if o is not author],
         created_by_ref=author.id,

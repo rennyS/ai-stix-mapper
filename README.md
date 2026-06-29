@@ -6,8 +6,10 @@ An OpenAI model reads the report, extracts entities and IOCs, and infers the STI
 
 ## Design rules
 
-- **No `observed-data`.** IOCs are modelled the OpenCTI-friendly way: an **`indicator`** (with a STIX pattern) plus the matching **cyber-observable (SCO)**, linked by a `based-on` relationship.
-- **One bundle, one Report.** Everything the model finds is referenced by a STIX `Report` so OpenCTI ingests it as a single container.
+- **No `observed-data`.** IOCs are modelled the OpenCTI-friendly way: an **`indicator`** (with a STIX pattern) plus the matching **cyber-observable (SCO)**, linked by a `based-on` relationship. Indicators are stamped with `x_opencti_main_observable_type` for deterministic import.
+- **Named groups are intrusion sets.** Adversary groups (APT28, FIN7, Lazarus, UNC####) map to **`intrusion-set`** — the OpenCTI/ATT&CK convention. `threat-actor` is reserved for a specific human/persona/operator; when a report attributes a group to a person, both are created and linked with `attributed-to`.
+- **Sectors vs organizations.** A targeted industry → `identity` with `identity_class = class` (OpenCTI **Sector**); a specific targeted company/agency → `identity` with `identity_class = organization`.
+- **One bundle, one Report.** Everything the model finds is referenced by a STIX `Report` (with `report_types`) so OpenCTI ingests it as a single container.
 - **OpenCTI import is draft-only.** Direct import (optional) always lands in a **draft workspace** so a human validates it before it touches the live knowledge base.
 - **OpenAI endpoint.** Uses the OpenAI API; set `OPENAI_BASE_URL` to point at any OpenAI-compatible endpoint.
 
@@ -52,9 +54,11 @@ The bundle is written as JSON. Import it manually via **Data → Import** in Ope
 
 | STIX object | From |
 | --- | --- |
-| `report` | the document itself (container) |
+| `report` | the document itself (container, with `report_types`) |
 | `indicator` + SCO (`ipv4-addr`, `domain-name`, `url`, `file`, `email-addr`, …) | IOCs, joined by `based-on` |
-| `threat-actor`, `intrusion-set`, `malware`, `tool`, `attack-pattern`, `campaign`, `vulnerability`, `identity`, `infrastructure`, `location`, `course-of-action` | named entities |
+| `intrusion-set` | named adversary groups (default for groups) |
+| `threat-actor` | a specific human/persona/operator only |
+| `malware`, `tool`, `attack-pattern`, `campaign`, `vulnerability`, `identity` (org **or** sector), `infrastructure`, `location`, `course-of-action` | named entities |
 | `relationship` | inferred SROs (`uses`, `targets`, `indicates`, `attributed-to`, `mitigates`, `exploits`, …) |
 
 > Direct draft import requires OpenCTI 6.2+ (draft workspaces) and a `pycti` release that supports them.

@@ -62,6 +62,9 @@ class Entity(BaseModel):
     aliases: list[str] = Field(default_factory=list)
     # attack-pattern only
     mitre_id: Optional[str] = Field(default=None, description="e.g. T1566 for ATT&CK techniques")
+    # identity only: organization (default), individual, system, or sector
+    # (a targeted industry/sector). Ignored for non-identity types.
+    identity_class: Optional[Literal["organization", "individual", "system", "sector"]] = None
 
 
 class Indicator(BaseModel):
@@ -87,6 +90,11 @@ class Extraction(BaseModel):
     report_description: str = Field(description="An executive summary of the report")
     published: Optional[str] = Field(
         default=None, description="ISO 8601 publish date if stated in the source, else null"
+    )
+    report_types: list[str] = Field(
+        default_factory=list,
+        description="STIX report types, e.g. 'threat-report', 'attack-pattern', "
+        "'campaign', 'indicator', 'malware'. Defaults to 'threat-report'.",
     )
     labels: list[str] = Field(default_factory=list, description="Tags / labels for the report")
     entities: list[Entity] = Field(default_factory=list)
